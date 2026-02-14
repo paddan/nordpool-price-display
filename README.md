@@ -1,9 +1,9 @@
 # elprismatare_tibber
 
-ESP32 + 2.4" TFT electricity price display for Tibber.
+ESP32 + 2.4" TFT electricity price display for Tibber or Nord Pool.
 
 This project runs on a FireBeetle ESP32 and shows:
-- Current price as large text (`#.## kr`) with color based on Tibber level.
+- Current price as large text (`#.## kr`) with color based on price level.
 - Hourly price bars for today + tomorrow.
 - Current hour with a white downward arrow marker.
 
@@ -21,6 +21,7 @@ Wiring is documented in `WIRING.md`.
 - `TFT_eSPI`
 - `ArduinoJson`
 - Tibber GraphQL API (`https://api.tibber.com/v1-beta/gql`)
+- Nord Pool Data Portal API (`https://dataportal-api.nordpoolgroup.com/api/DayAheadPriceIndices`)
 
 ## Configuration
 
@@ -28,7 +29,9 @@ Wiring is documented in `WIRING.md`.
 2. Fill in:
 - `WIFI_SSID`
 - `WIFI_PASSWORD`
-- `TIBBER_API_TOKEN`
+- `PRICE_SOURCE` (`PRICE_SOURCE_TIBBER` or `PRICE_SOURCE_NORDPOOL`)
+- `NORDPOOL_AREA` and `NORDPOOL_CURRENCY` when using Nord Pool
+- `TIBBER_API_TOKEN` when using Tibber
 
 `include/secrets.h` is ignored by git and must stay local.
 
@@ -44,17 +47,19 @@ platformio device monitor -b 115200
 
 - Connects to Wi-Fi at boot.
 - Syncs time via NTP (`CET/CEST` timezone).
-- Fetches Tibber `priceInfo` at startup.
+- Fetches price data from the configured provider at startup.
 - Refreshes hourly state from local clock.
 - Fetches full price data again daily at 13:00 local time.
 - Retries every 30 seconds on fetch failure.
 - Applies custom price calculation: `1.25 * energy + 0.84225` (kr/kWh).
+- Nord Pool level mapping: `< 1.00 => LOW`, `< 2.00 => NORMAL`, `>= 2.00 => HIGH`.
 
 ## Project Structure
 
 - `src/main.cpp`: app flow and scheduling
 - `src/display_ui.cpp`: TFT rendering
 - `src/tibber_client.cpp`: Tibber API client
+- `src/nordpool_client.cpp`: Nord Pool API client
 - `src/wifi_utils.cpp`: Wi-Fi helper
 - `src/time_utils.cpp`: time/date helpers
 - `src/logging_utils.cpp`: serial logging

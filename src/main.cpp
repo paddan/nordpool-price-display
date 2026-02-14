@@ -6,6 +6,7 @@
 #include "app_types.h"
 #include "display_ui.h"
 #include "logging_utils.h"
+#include "nordpool_client.h"
 #include "tibber_client.h"
 #include "time_utils.h"
 #include "wifi_utils.h"
@@ -20,9 +21,35 @@ constexpr uint32_t kWifiConnectTimeoutMs = 20000;
 constexpr uint32_t kRetryOnErrorMs = 30000;
 constexpr time_t kRetryDailyIfUnchangedSec = 10 * 60;
 constexpr char kTibberGraphQlUrl[] = "https://api.tibber.com/v1-beta/gql";
+constexpr char kNordPoolApiUrl[] = "https://dataportal-api.nordpoolgroup.com/api/DayAheadPriceIndices";
 constexpr char kTimezoneSpec[] = "CET-1CEST,M3.5.0/2,M10.5.0/3";
-constexpr bool kTokenMissing = (sizeof(TIBBER_API_TOKEN) <= 1);
 constexpr time_t kValidEpochMin = 1700000000;
+
+#ifndef PRICE_SOURCE_TIBBER
+#define PRICE_SOURCE_TIBBER 0
+#endif
+
+#ifndef PRICE_SOURCE_NORDPOOL
+#define PRICE_SOURCE_NORDPOOL 1
+#endif
+
+#ifndef PRICE_SOURCE
+#define PRICE_SOURCE PRICE_SOURCE_TIBBER
+#endif
+
+#ifndef NORDPOOL_AREA
+#define NORDPOOL_AREA "SE3"
+#endif
+
+#ifndef NORDPOOL_CURRENCY
+#define NORDPOOL_CURRENCY "SEK"
+#endif
+
+#if PRICE_SOURCE == PRICE_SOURCE_TIBBER
+constexpr bool kTokenMissing = (sizeof(TIBBER_API_TOKEN) <= 1);
+#else
+constexpr bool kTokenMissing = false;
+#endif
 
 PriceState gState;
 uint32_t gLastFetchMs = 0;
@@ -72,7 +99,11 @@ void applyFetchedState(const PriceState &fetched)
 void fetchAndRender()
 {
   logf("Fetch+render start");
+#if PRICE_SOURCE == PRICE_SOURCE_NORDPOOL
+  applyFetchedState(fetchNordPoolPriceInfo(kNordPoolApiUrl, NORDPOOL_AREA, NORDPOOL_CURRENCY));
+#else
   applyFetchedState(fetchPriceInfo(TIBBER_API_TOKEN, kTibberGraphQlUrl));
+#endif
   logf("Fetch+render done");
 }
 
@@ -177,7 +208,11 @@ void handleClockDrivenUpdates(time_t now)
   if (gNextDailyFetch != 0 && now >= gNextDailyFetch)
   {
     logf("Daily 13:00 fetch trigger");
+#if PRICE_SOURCE == PRICE_SOURCE_NORDPOOL
+    const PriceState fetched = fetchNordPoolPriceInfo(kNordPoolApiUrl, NORDPOOL_AREA, NORDPOOL_CURRENCY);
+#else
     const PriceState fetched = fetchPriceInfo(TIBBER_API_TOKEN, kTibberGraphQlUrl);
+#endif
     if (!fetched.ok)
     {
       logf("Daily fetch failed, retry in %ld sec", (long)kRetryDailyIfUnchangedSec);
