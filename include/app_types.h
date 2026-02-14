@@ -13,6 +13,7 @@ struct PricePoint {
 struct PriceState {
   bool ok = false;
   String error;
+  String source = "UNKNOWN";
   String currency = "SEK";
   String currentStartsAt;
   String currentLevel = "UNKNOWN";

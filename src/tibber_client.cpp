@@ -56,6 +56,7 @@ void addPoints(JsonArray arr, PriceState &state) {
 
 PriceState fetchPriceInfo(const char *apiToken, const char *graphQlUrl) {
   PriceState out;
+  out.source = "TIBBER";
   logf("PriceInfo fetch start. free_heap=%u", ESP.getFreeHeap());
 
   if (apiToken == nullptr || strlen(apiToken) == 0) {

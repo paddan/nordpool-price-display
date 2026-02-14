@@ -45,6 +45,8 @@ namespace
   // Axis font sizes (TFT_eSPI bitmap fonts).
   constexpr int kYAxisFontSize = 1;    // Y-axis labels/ticks text scale.
   constexpr int kTopXAxisFontSize = 1; // Day labels text scale.
+  constexpr int kSourceLabelX = 316;
+  constexpr int kSourceLabelY = 4;
 
   String formatPrice(float value)
   {
@@ -55,14 +57,17 @@ namespace
 
   uint16_t levelColor(const String &level)
   {
-    // Requested grouping:
-    // LOW -> green, NORMAL -> yellow, HIGH -> red.
-    if (level == "HIGH" || level == "VERY_EXPENSIVE" || level == "EXPENSIVE")
-      return TFT_RED;
+    // 5-step gradient: light green -> dark red.
+    if (level == "VERY_CHEAP" || level == "LOW")
+      return tft.color565(170, 255, 170);  // light green
+    if (level == "CHEAP")
+      return tft.color565(96, 210, 110);   // medium green
     if (level == "NORMAL")
-      return TFT_YELLOW;
-    if (level == "LOW" || level == "VERY_CHEAP" || level == "CHEAP")
-      return TFT_GREEN;
+      return tft.color565(245, 190, 70);   // warm yellow/orange
+    if (level == "EXPENSIVE" || level == "HIGH")
+      return tft.color565(185, 55, 35);    // red
+    if (level == "VERY_EXPENSIVE")
+      return tft.color565(100, 0, 0);      // dark red
     return TFT_WHITE;
   }
 
@@ -145,6 +150,16 @@ namespace
     tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
     tft.setTextFont(2);
     tft.drawString(errorText, kScreenCenterX, 96);
+  }
+
+  void drawSourceLabel(const String &source)
+  {
+    const String text = source.isEmpty() ? "UNKNOWN" : source;
+    tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
+    tft.setTextFont(2);
+    tft.setTextDatum(TR_DATUM);
+    tft.drawString(text, kSourceLabelX, kSourceLabelY);
+    tft.setTextDatum(TL_DATUM);
   }
 
   void drawYAxis(const ChartRange &range, int xAxisY, int drawableH)
@@ -275,6 +290,7 @@ void displayDrawPrices(const PriceState &state)
   tft.fillScreen(TFT_BLACK);
   tft.setTextWrap(false);
   tft.setTextSize(1);
+  drawSourceLabel(state.source);
 
   if (!state.ok)
   {

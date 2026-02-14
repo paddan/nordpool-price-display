@@ -52,7 +52,7 @@ platformio device monitor -b 115200
 - Fetches full price data again daily at 13:00 local time.
 - Retries every 30 seconds on fetch failure.
 - Applies custom price calculation: `1.25 * energy + 0.84225` (kr/kWh).
-- Nord Pool level mapping: `< 1.00 => LOW`, `< 2.00 => NORMAL`, `>= 2.00 => HIGH`.
+- Nord Pool level mapping uses Tibber-style bands against a 72-hour moving average persisted in SPIFFS (`/nordpool_ma.bin`).
 
 ## Project Structure
 

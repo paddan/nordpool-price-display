@@ -56,6 +56,15 @@ uint32_t gLastFetchMs = 0;
 time_t gNextDailyFetch = 0;
 uint32_t gLastMinuteTick = 0;
 
+const char *activeSourceLabel()
+{
+#if PRICE_SOURCE == PRICE_SOURCE_NORDPOOL
+  return "NORDPOOL";
+#else
+  return "TIBBER";
+#endif
+}
+
 void logNextFetch(time_t nextFetch)
 {
   if (nextFetch == 0)
@@ -259,6 +268,7 @@ void setup()
   if (kTokenMissing)
   {
     gState.ok = false;
+    gState.source = activeSourceLabel();
     gState.error = "Set token in include/secrets.h";
     displayDrawPrices(gState);
     return;
@@ -267,6 +277,7 @@ void setup()
   if (!wifiConnect(WIFI_SSID, WIFI_PASSWORD, kWifiConnectTimeoutMs))
   {
     gState.ok = false;
+    gState.source = activeSourceLabel();
     gState.error = "WiFi timeout";
     displayDrawPrices(gState);
     return;

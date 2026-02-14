@@ -1,9 +1,12 @@
 #include <ArduinoJson.h>
+#include <FS.h>
 #include <HTTPClient.h>
+#include <SPIFFS.h>
 #include <WiFi.h>
 #include <WiFiClientSecure.h>
 #include <math.h>
 #include <stdint.h>
+#include <string.h>
 #include <time.h>
 
 #include "logging_utils.h"
@@ -12,6 +15,20 @@
 
 namespace {
 constexpr uint32_t kHttpTimeoutMs = 10000;
+constexpr size_t kMovingAverageWindowHours = 72;
+constexpr char kMovingAveragePath[] = "/nordpool_ma.bin";
+constexpr float kDefaultMovingAverageKrPerKwh = 1.0f;
+constexpr uint32_t kAvgStoreMagic = 0x4E504D41;  // "NPMA"
+constexpr uint16_t kAvgStoreVersion = 1;
+
+struct MovingAverageStore {
+  uint32_t magic = kAvgStoreMagic;
+  uint16_t version = kAvgStoreVersion;
+  uint16_t count = 0;
+  uint16_t head = 0;  // next write index
+  char lastHourKey[14] = {0};  // YYYY-MM-DDTHH
+  float values[kMovingAverageWindowHours] = {0.0f};
+};
 
 float applyCustomPriceFormula(float rawPriceKrPerKwh) {
   // Apply formula in ore: 1.25 * hourly_price + 84.225, then convert back to kr.
@@ -21,9 +38,8 @@ float applyCustomPriceFormula(float rawPriceKrPerKwh) {
 }
 
 String classifyLevel(float priceKrPerKwh) {
-  if (priceKrPerKwh < 1.0f) return "LOW";
-  if (priceKrPerKwh < 2.0f) return "NORMAL";
-  return "HIGH";
+  (void)priceKrPerKwh;
+  return "UNKNOWN";
 }
 
 bool formatDate(time_t ts, char *out, size_t outSize) {
@@ -44,6 +60,113 @@ bool parseUtcIso(const String &iso, struct tm &tmUtc) {
   tmUtc.tm_sec = iso.substring(17, 19).toInt();
 
   return true;
+}
+
+bool isHourKey(const String &value) {
+  return value.length() == 13;
+}
+
+bool ensureSpiffsMounted() {
+  static bool attempted = false;
+  static bool mounted = false;
+  if (!attempted) {
+    attempted = true;
+    mounted = SPIFFS.begin(true);
+    logf("SPIFFS mount: %s", mounted ? "ok" : "failed");
+    if (mounted) {
+      logf("SPIFFS info: used=%u total=%u", (unsigned)SPIFFS.usedBytes(), (unsigned)SPIFFS.totalBytes());
+    }
+  }
+  return mounted;
+}
+
+void resetStore(MovingAverageStore &store) {
+  store = MovingAverageStore();
+}
+
+bool loadStore(MovingAverageStore &store) {
+  if (!ensureSpiffsMounted()) return false;
+
+  File file = SPIFFS.open(kMovingAveragePath, FILE_READ);
+  if (!file) return false;
+
+  if ((size_t)file.size() != sizeof(MovingAverageStore)) {
+    file.close();
+    return false;
+  }
+
+  const size_t readBytes = file.read((uint8_t *)&store, sizeof(MovingAverageStore));
+  file.close();
+  if (readBytes != sizeof(MovingAverageStore)) return false;
+  if (store.magic != kAvgStoreMagic || store.version != kAvgStoreVersion) return false;
+  if (store.head >= kMovingAverageWindowHours) return false;
+  if (store.count > kMovingAverageWindowHours) return false;
+  return true;
+}
+
+bool saveStore(const MovingAverageStore &store) {
+  if (!ensureSpiffsMounted()) return false;
+
+  File file = SPIFFS.open(kMovingAveragePath, FILE_WRITE);
+  if (!file) return false;
+
+  const size_t written = file.write((const uint8_t *)&store, sizeof(MovingAverageStore));
+  file.flush();
+  file.close();
+  return written == sizeof(MovingAverageStore);
+}
+
+void addMovingAverageSample(MovingAverageStore &store, float value) {
+  store.values[store.head] = value;
+  store.head = (store.head + 1) % kMovingAverageWindowHours;
+  if (store.count < kMovingAverageWindowHours) ++store.count;
+}
+
+float movingAverageValue(const MovingAverageStore &store) {
+  if (store.count == 0) return 0.0f;
+
+  float sum = 0.0f;
+  for (size_t i = 0; i < store.count; ++i) {
+    sum += store.values[i];
+  }
+  return sum / (float)store.count;
+}
+
+String classifyLevelFromAverage(float priceKrPerKwh, float movingAvgKrPerKwh) {
+  if (movingAvgKrPerKwh <= 0.0001f) return "UNKNOWN";
+
+  const float ratio = priceKrPerKwh / movingAvgKrPerKwh;
+  if (ratio <= 0.60f) return "VERY_CHEAP";
+  if (ratio <= 0.90f) return "CHEAP";
+  if (ratio < 1.15f) return "NORMAL";
+  if (ratio < 1.40f) return "EXPENSIVE";
+  return "VERY_EXPENSIVE";
+}
+
+void applyLevelsFromMovingAverage(PriceState &state, float movingAvgKrPerKwh) {
+  for (size_t i = 0; i < state.count; ++i) {
+    state.points[i].level = classifyLevelFromAverage(state.points[i].price, movingAvgKrPerKwh);
+  }
+}
+
+bool updateHistoryFromPoints(PriceState &state, MovingAverageStore &store, const String &nowKey) {
+  if (!isHourKey(nowKey)) return false;
+
+  bool changed = false;
+  String lastPersisted = String(store.lastHourKey);
+  for (size_t i = 0; i < state.count; ++i) {
+    const String pointKey = hourKeyFromIso(state.points[i].startsAt);
+    if (!isHourKey(pointKey)) continue;
+    if (pointKey > nowKey) continue;              // future hour, ignore
+    if (isHourKey(lastPersisted) && pointKey <= lastPersisted) continue;  // already processed
+
+    addMovingAverageSample(store, state.points[i].price);
+    strncpy(store.lastHourKey, pointKey.c_str(), sizeof(store.lastHourKey) - 1);
+    store.lastHourKey[sizeof(store.lastHourKey) - 1] = '\0';
+    lastPersisted = pointKey;
+    changed = true;
+  }
+  return changed;
 }
 
 int64_t daysFromCivil(int year, unsigned month, unsigned day) {
@@ -187,13 +310,18 @@ void assignCurrentFromClock(PriceState &out) {
 
   const PricePoint &point = out.points[out.currentIndex];
   out.currentStartsAt = point.startsAt;
-  out.currentLevel = point.level;
   out.currentPrice = point.price;
+}
+
+void assignCurrentLevel(PriceState &out) {
+  if (out.currentIndex < 0 || out.currentIndex >= (int)out.count) return;
+  out.currentLevel = out.points[out.currentIndex].level;
 }
 }  // namespace
 
 PriceState fetchNordPoolPriceInfo(const char *apiBaseUrl, const char *area, const char *currency) {
   PriceState out;
+  out.source = "NORDPOOL";
   logf("Nord Pool fetch start. free_heap=%u", ESP.getFreeHeap());
 
   if (WiFi.status() != WL_CONNECTED) {
@@ -239,21 +367,39 @@ PriceState fetchNordPoolPriceInfo(const char *apiBaseUrl, const char *area, cons
     return out;
   }
 
+  MovingAverageStore store;
+  if (!loadStore(store)) {
+    resetStore(store);
+  }
+
+  const String nowKey = currentHourKey();
+  const bool historyChanged = updateHistoryFromPoints(out, store, nowKey);
+  if (historyChanged && !saveStore(store)) {
+    logf("Nord Pool moving average save failed");
+  }
+
+  float movingAvgKrPerKwh =
+      store.count == 0 ? kDefaultMovingAverageKrPerKwh : movingAverageValue(store);
+  if (movingAvgKrPerKwh <= 0.0001f) movingAvgKrPerKwh = kDefaultMovingAverageKrPerKwh;
+  applyLevelsFromMovingAverage(out, movingAvgKrPerKwh);
+
   assignCurrentFromClock(out);
   if (out.currentIndex < 0) {
     out.currentIndex = 0;
     out.currentStartsAt = out.points[0].startsAt;
-    out.currentLevel = out.points[0].level;
     out.currentPrice = out.points[0].price;
   }
+  assignCurrentLevel(out);
 
   out.ok = true;
   logf(
-      "Nord Pool OK: points=%u current=%.3f %s level=%s",
+      "Nord Pool OK: points=%u current=%.3f %s level=%s ma=%.3f samples=%u",
       (unsigned)out.count,
       out.currentPrice,
       out.currency.c_str(),
-      out.currentLevel.c_str()
+      out.currentLevel.c_str(),
+      movingAvgKrPerKwh,
+      (unsigned)store.count
   );
   return out;
 }
