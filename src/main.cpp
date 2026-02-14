@@ -98,6 +98,38 @@ bool hasNewPriceInfo(const PriceState &fetched, const PriceState &current)
   return false;
 }
 
+size_t dayCount(const PriceState &state)
+{
+  if (!state.ok || state.count == 0)
+    return 0;
+
+  size_t uniqueDays = 0;
+  String lastDay = "";
+  for (size_t i = 0; i < state.count; ++i)
+  {
+    if (state.points[i].startsAt.length() < 10)
+      continue;
+    const String day = state.points[i].startsAt.substring(0, 10);
+    if (day != lastDay)
+    {
+      lastDay = day;
+      ++uniqueDays;
+    }
+  }
+  return uniqueDays;
+}
+
+bool wouldReduceCoverage(const PriceState &fetched, const PriceState &current)
+{
+  if (!fetched.ok || !current.ok || current.count == 0)
+    return false;
+
+  if (fetched.count < current.count)
+    return true;
+
+  return dayCount(fetched) < dayCount(current);
+}
+
 void updateCurrentHourFromClock()
 {
   if (!gState.ok || gState.count == 0)
@@ -150,6 +182,18 @@ void handleClockDrivenUpdates(time_t now)
     {
       logf("Daily fetch failed, retry in %ld sec", (long)kRetryDailyIfUnchangedSec);
       applyFetchedState(fetched);
+      gNextDailyFetch = now + kRetryDailyIfUnchangedSec;
+      logNextFetch(gNextDailyFetch);
+      return;
+    }
+
+    if (wouldReduceCoverage(fetched, gState))
+    {
+      logf(
+          "Daily fetch has fewer prices (%u < %u), keep existing and retry in %ld sec",
+          (unsigned)fetched.count,
+          (unsigned)gState.count,
+          (long)kRetryDailyIfUnchangedSec);
       gNextDailyFetch = now + kRetryDailyIfUnchangedSec;
       logNextFetch(gNextDailyFetch);
       return;

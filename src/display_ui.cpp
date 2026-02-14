@@ -38,8 +38,9 @@ namespace
   constexpr int kAxisLabelX = kChartX - 8; // Y-axis number labels to the left of graph.
 
   // Current-hour arrow marker.
-  constexpr int kCurrentArrowHalfWidth = 4; // Half arrow base width (full width = *2).
-  constexpr int kCurrentArrowHeight = 13;   // Arrow height.
+  constexpr int kCurrentArrowHalfWidth = 4;          // Half arrow base width (full width = *2).
+  constexpr int kCurrentArrowHeight = 13;            // Arrow height.
+  constexpr uint16_t kCurrentArrowColor = TFT_WHITE; // Arrow color.
 
   // Axis font sizes (TFT_eSPI bitmap fonts).
   constexpr int kYAxisFontSize = 1;    // Y-axis labels/ticks text scale.
@@ -212,7 +213,7 @@ namespace
         baseY,
         centerX,
         tipY,
-        TFT_SKYBLUE);
+        kCurrentArrowColor);
   }
 
   void drawBars(const PriceState &state, const ChartRange &range, int xAxisY, int drawableH)
