@@ -149,17 +149,15 @@ void applyLevelsFromMovingAverage(PriceState &state, float movingAvgKrPerKwh) {
   }
 }
 
-bool updateHistoryFromPoints(PriceState &state, MovingAverageStore &store, const String &nowKey) {
-  if (!isHourKey(nowKey)) return false;
-
+bool updateHistoryFromPoints(PriceState &state, MovingAverageStore &store) {
   bool changed = false;
   String lastPersisted = String(store.lastHourKey);
   for (size_t i = 0; i < state.count; ++i) {
     const String pointKey = hourKeyFromIso(state.points[i].startsAt);
     if (!isHourKey(pointKey)) continue;
-    if (pointKey > nowKey) continue;              // future hour, ignore
     if (isHourKey(lastPersisted) && pointKey <= lastPersisted) continue;  // already processed
 
+    // Include all available fetched hours (today + tomorrow) in the rolling history.
     addMovingAverageSample(store, state.points[i].price);
     strncpy(store.lastHourKey, pointKey.c_str(), sizeof(store.lastHourKey) - 1);
     store.lastHourKey[sizeof(store.lastHourKey) - 1] = '\0';
@@ -326,8 +324,7 @@ uint16_t applyMovingAverageToState(PriceState &state) {
     resetStore(store);
   }
 
-  const String nowKey = currentHourKey();
-  const bool historyChanged = updateHistoryFromPoints(state, store, nowKey);
+  const bool historyChanged = updateHistoryFromPoints(state, store);
   if (historyChanged && !saveStore(store)) {
     logf("Nord Pool moving average save failed");
   }
@@ -415,7 +412,7 @@ PriceState fetchNordPoolPriceInfo(const char *apiBaseUrl, const char *area, cons
 }
 
 void nordPoolPreupdateMovingAverageFromPriceInfo(PriceState &state) {
-  if (state.source != "NORDPOOL") return;
+  if (state.source != "NORDPOOL" && state.source != "no wifi") return;
   if (!state.ok || state.count == 0) return;
 
   (void)applyMovingAverageToState(state);

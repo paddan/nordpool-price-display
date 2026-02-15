@@ -325,7 +325,6 @@ void setup()
   {
     if (priceCacheLoadIfAvailable(activeSourceLabel(), cached))
     {
-      nordPoolPreupdateMovingAverageFromPriceInfo(cached);
       gState = cached;
       gState.source = "no wifi";
       displayDrawPrices(gState);
@@ -348,7 +347,6 @@ void setup()
 
   if (priceCacheLoadIfCurrent(activeSourceLabel(), cached))
   {
-    nordPoolPreupdateMovingAverageFromPriceInfo(cached);
     gState = cached;
     if (!priceCacheSave(gState))
     {
