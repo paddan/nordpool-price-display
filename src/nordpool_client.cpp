@@ -381,6 +381,8 @@ PriceState fetchNordPoolPriceInfo(const char *apiBaseUrl, const char *area, cons
   float movingAvgKrPerKwh =
       store.count == 0 ? kDefaultMovingAverageKrPerKwh : movingAverageValue(store);
   if (movingAvgKrPerKwh <= 0.0001f) movingAvgKrPerKwh = kDefaultMovingAverageKrPerKwh;
+  out.hasRunningAverage = true;
+  out.runningAverage = movingAvgKrPerKwh;
   applyLevelsFromMovingAverage(out, movingAvgKrPerKwh);
 
   assignCurrentFromClock(out);

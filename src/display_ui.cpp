@@ -48,6 +48,7 @@ namespace
   constexpr int kTopXAxisFontSize = 1; // Day labels text scale.
   constexpr int kSourceLabelX = 316;
   constexpr int kSourceLabelY = 4;
+  constexpr uint16_t kAverageLineColor = TFT_CYAN;
 
   String formatPrice(float value)
   {
@@ -352,6 +353,30 @@ namespace
     tft.setTextDatum(TL_DATUM);
   }
 
+  void drawRunningAverage(const PriceState &state, const ChartRange &range, int xAxisY, int drawableH)
+  {
+    if (!state.hasRunningAverage)
+      return;
+
+    int yAvg = priceToY(state.runningAverage, range, xAxisY, drawableH);
+    if (yAvg < kChartY)
+      yAvg = kChartY;
+    if (yAvg > xAxisY)
+      yAvg = xAxisY;
+
+    for (int x = kChartX; x < (kChartX + kChartW); x += 6)
+    {
+      tft.drawFastHLine(x, yAvg, 3, kAverageLineColor);
+    }
+
+    char label[16];
+    snprintf(label, sizeof(label), "%.1f", state.runningAverage);
+    tft.setTextColor(kAverageLineColor, TFT_BLACK);
+    tft.setTextDatum(MR_DATUM);
+    tft.drawString(String(label), kAxisLabelX, yAvg);
+    tft.setTextDatum(TL_DATUM);
+  }
+
   void drawCurrentArrow(int barX, int barW, int barY)
   {
     const int centerX = barX + (barW / 2);
@@ -468,4 +493,5 @@ void displayDrawPrices(const PriceState &state)
   tft.drawFastHLine(kChartX, xAxisY, kChartW, TFT_DARKGREY);
   drawYAxis(range, xAxisY, drawableH);
   drawBars(state, range, bands, xAxisY, drawableH);
+  drawRunningAverage(state, range, xAxisY, drawableH);
 }

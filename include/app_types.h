@@ -14,6 +14,8 @@ struct PriceState {
   bool ok = false;
   String error;
   String source = "UNKNOWN";
+  bool hasRunningAverage = false;
+  float runningAverage = 0.0f;
   String currency = "SEK";
   String currentStartsAt;
   String currentLevel = "UNKNOWN";
