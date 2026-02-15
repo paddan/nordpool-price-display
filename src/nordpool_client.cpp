@@ -317,6 +317,38 @@ void assignCurrentLevel(PriceState &out) {
   if (out.currentIndex < 0 || out.currentIndex >= (int)out.count) return;
   out.currentLevel = out.points[out.currentIndex].level;
 }
+
+uint16_t applyMovingAverageToState(PriceState &state) {
+  if (state.count == 0) return 0;
+
+  MovingAverageStore store;
+  if (!loadStore(store)) {
+    resetStore(store);
+  }
+
+  const String nowKey = currentHourKey();
+  const bool historyChanged = updateHistoryFromPoints(state, store, nowKey);
+  if (historyChanged && !saveStore(store)) {
+    logf("Nord Pool moving average save failed");
+  }
+
+  float movingAvgKrPerKwh =
+      store.count == 0 ? kDefaultMovingAverageKrPerKwh : movingAverageValue(store);
+  if (movingAvgKrPerKwh <= 0.0001f) movingAvgKrPerKwh = kDefaultMovingAverageKrPerKwh;
+
+  state.hasRunningAverage = true;
+  state.runningAverage = movingAvgKrPerKwh;
+  applyLevelsFromMovingAverage(state, movingAvgKrPerKwh);
+
+  assignCurrentFromClock(state);
+  if (state.currentIndex < 0) {
+    state.currentIndex = 0;
+    state.currentStartsAt = state.points[0].startsAt;
+    state.currentPrice = state.points[0].price;
+  }
+  assignCurrentLevel(state);
+  return store.count;
+}
 }  // namespace
 
 PriceState fetchNordPoolPriceInfo(const char *apiBaseUrl, const char *area, const char *currency) {
@@ -367,31 +399,7 @@ PriceState fetchNordPoolPriceInfo(const char *apiBaseUrl, const char *area, cons
     return out;
   }
 
-  MovingAverageStore store;
-  if (!loadStore(store)) {
-    resetStore(store);
-  }
-
-  const String nowKey = currentHourKey();
-  const bool historyChanged = updateHistoryFromPoints(out, store, nowKey);
-  if (historyChanged && !saveStore(store)) {
-    logf("Nord Pool moving average save failed");
-  }
-
-  float movingAvgKrPerKwh =
-      store.count == 0 ? kDefaultMovingAverageKrPerKwh : movingAverageValue(store);
-  if (movingAvgKrPerKwh <= 0.0001f) movingAvgKrPerKwh = kDefaultMovingAverageKrPerKwh;
-  out.hasRunningAverage = true;
-  out.runningAverage = movingAvgKrPerKwh;
-  applyLevelsFromMovingAverage(out, movingAvgKrPerKwh);
-
-  assignCurrentFromClock(out);
-  if (out.currentIndex < 0) {
-    out.currentIndex = 0;
-    out.currentStartsAt = out.points[0].startsAt;
-    out.currentPrice = out.points[0].price;
-  }
-  assignCurrentLevel(out);
+  const uint16_t sampleCount = applyMovingAverageToState(out);
 
   out.ok = true;
   logf(
@@ -400,8 +408,15 @@ PriceState fetchNordPoolPriceInfo(const char *apiBaseUrl, const char *area, cons
       out.currentPrice,
       out.currency.c_str(),
       out.currentLevel.c_str(),
-      movingAvgKrPerKwh,
-      (unsigned)store.count
+      out.runningAverage,
+      (unsigned)sampleCount
   );
   return out;
+}
+
+void nordPoolPreupdateMovingAverageFromPriceInfo(PriceState &state) {
+  if (state.source != "NORDPOOL") return;
+  if (!state.ok || state.count == 0) return;
+
+  (void)applyMovingAverageToState(state);
 }

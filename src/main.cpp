@@ -7,7 +7,7 @@
 #include "display_ui.h"
 #include "logging_utils.h"
 #include "nordpool_client.h"
-#include "tibber_client.h"
+#include "price_cache.h"
 #include "time_utils.h"
 #include "wifi_utils.h"
 
@@ -20,22 +20,9 @@
 constexpr uint32_t kWifiConnectTimeoutMs = 20000;
 constexpr uint32_t kRetryOnErrorMs = 30000;
 constexpr time_t kRetryDailyIfUnchangedSec = 10 * 60;
-constexpr char kTibberGraphQlUrl[] = "https://api.tibber.com/v1-beta/gql";
 constexpr char kNordPoolApiUrl[] = "https://dataportal-api.nordpoolgroup.com/api/DayAheadPriceIndices";
 constexpr char kTimezoneSpec[] = "CET-1CEST,M3.5.0/2,M10.5.0/3";
 constexpr time_t kValidEpochMin = 1700000000;
-
-#ifndef PRICE_SOURCE_TIBBER
-#define PRICE_SOURCE_TIBBER 0
-#endif
-
-#ifndef PRICE_SOURCE_NORDPOOL
-#define PRICE_SOURCE_NORDPOOL 1
-#endif
-
-#ifndef PRICE_SOURCE
-#define PRICE_SOURCE PRICE_SOURCE_TIBBER
-#endif
 
 #ifndef NORDPOOL_AREA
 #define NORDPOOL_AREA "SE3"
@@ -45,12 +32,6 @@ constexpr time_t kValidEpochMin = 1700000000;
 #define NORDPOOL_CURRENCY "SEK"
 #endif
 
-#if PRICE_SOURCE == PRICE_SOURCE_TIBBER
-constexpr bool kTokenMissing = (sizeof(TIBBER_API_TOKEN) <= 1);
-#else
-constexpr bool kTokenMissing = false;
-#endif
-
 PriceState gState;
 uint32_t gLastFetchMs = 0;
 time_t gNextDailyFetch = 0;
@@ -58,11 +39,7 @@ uint32_t gLastMinuteTick = 0;
 
 const char *activeSourceLabel()
 {
-#if PRICE_SOURCE == PRICE_SOURCE_NORDPOOL
   return "NORDPOOL";
-#else
-  return "TIBBER";
-#endif
 }
 
 void logNextFetch(time_t nextFetch)
@@ -92,6 +69,10 @@ void applyFetchedState(const PriceState &fetched)
   if (fetched.ok)
   {
     gState = fetched;
+    if (!priceCacheSave(gState))
+    {
+      logf("Price cache save failed");
+    }
   }
   else if (gState.count > 0)
   {
@@ -108,11 +89,7 @@ void applyFetchedState(const PriceState &fetched)
 void fetchAndRender()
 {
   logf("Fetch+render start");
-#if PRICE_SOURCE == PRICE_SOURCE_NORDPOOL
   applyFetchedState(fetchNordPoolPriceInfo(kNordPoolApiUrl, NORDPOOL_AREA, NORDPOOL_CURRENCY));
-#else
-  applyFetchedState(fetchPriceInfo(TIBBER_API_TOKEN, kTibberGraphQlUrl));
-#endif
   logf("Fetch+render done");
 }
 
@@ -217,11 +194,7 @@ void handleClockDrivenUpdates(time_t now)
   if (gNextDailyFetch != 0 && now >= gNextDailyFetch)
   {
     logf("Daily 13:00 fetch trigger");
-#if PRICE_SOURCE == PRICE_SOURCE_NORDPOOL
     const PriceState fetched = fetchNordPoolPriceInfo(kNordPoolApiUrl, NORDPOOL_AREA, NORDPOOL_CURRENCY);
-#else
-    const PriceState fetched = fetchPriceInfo(TIBBER_API_TOKEN, kTibberGraphQlUrl);
-#endif
     if (!fetched.ok)
     {
       logf("Daily fetch failed, retry in %ld sec", (long)kRetryDailyIfUnchangedSec);
@@ -265,15 +238,6 @@ void setup()
 
   displayInit();
 
-  if (kTokenMissing)
-  {
-    gState.ok = false;
-    gState.source = activeSourceLabel();
-    gState.error = "Set token in include/secrets.h";
-    displayDrawPrices(gState);
-    return;
-  }
-
   if (!wifiConnect(WIFI_SSID, WIFI_PASSWORD, kWifiConnectTimeoutMs))
   {
     gState.ok = false;
@@ -285,6 +249,21 @@ void setup()
 
   syncClock(kTimezoneSpec);
   scheduleDailyFetch(time(nullptr));
+
+  PriceState cached;
+  if (priceCacheLoadIfCurrent(activeSourceLabel(), cached))
+  {
+    nordPoolPreupdateMovingAverageFromPriceInfo(cached);
+    gState = cached;
+    if (!priceCacheSave(gState))
+    {
+      logf("Price cache save failed");
+    }
+    displayDrawPrices(gState);
+    logf("Loaded current prices from cache: points=%u", (unsigned)gState.count);
+    return;
+  }
+
   fetchAndRender();
 }
 
