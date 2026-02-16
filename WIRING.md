@@ -42,3 +42,13 @@ Do not use 5V logic on ESP32 signal pins.
 - `LCD_RD` must be held HIGH at 3.3V. If your shield has no 3.3V pin, use ESP32 `3V3`.
 - If the screen stays white, the controller may not be ILI9341. In that case change `ILI9341_DRIVER` in `platformio.ini` to the matching TFT_eSPI driver.
 - SD card pins on this shield are not configured yet.
+
+## Optional Reset Button (Wi-Fi/config reset)
+
+You can wire a button to clear saved Wi-Fi and Nord Pool settings:
+
+- One side of button -> configured `CONFIG_RESET_PIN`
+- Other side -> `GND` (if `CONFIG_RESET_ACTIVE_LEVEL=LOW`) or `3V3` (if `HIGH`)
+
+Default project config has `CONFIG_RESET_PIN=-1` (disabled). Set a free GPIO in `platformio.ini` to enable it.
+When enabled, hold the button for 2 seconds during runtime or boot to clear saved config and restart.

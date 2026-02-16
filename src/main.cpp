@@ -11,39 +11,74 @@
 #include "time_utils.h"
 #include "wifi_utils.h"
 
-#if __has_include("secrets.h")
-#include "secrets.h"
-#else
-#error "Missing include/secrets.h. Copy include/secrets.example.h to include/secrets.h and set credentials."
-#endif
-
 constexpr uint32_t kWifiConnectTimeoutMs = 20000;
+constexpr uint16_t kWifiPortalTimeoutSec = 60;
 constexpr uint32_t kRetryOnErrorMs = 30000;
 constexpr time_t kRetryDailyIfUnchangedSec = 10 * 60;
+constexpr uint32_t kResetHoldMs = 2000;
+constexpr uint32_t kResetPollIntervalMs = 50;
 constexpr int kDailyFetchHour = 13;
 constexpr int kDailyFetchMinute = 0;
 constexpr char kNordPoolApiUrl[] = "https://dataportal-api.nordpoolgroup.com/api/DayAheadPriceIndices";
 constexpr char kTimezoneSpec[] = "CET-1CEST,M3.5.0/2,M10.5.0/3";
 constexpr time_t kValidEpochMin = 1700000000;
 
-#ifndef NORDPOOL_AREA
-#define NORDPOOL_AREA "SE3"
+#ifndef CONFIG_RESET_PIN
+#define CONFIG_RESET_PIN -1
 #endif
 
-#ifndef NORDPOOL_CURRENCY
-#define NORDPOOL_CURRENCY "SEK"
+#ifndef CONFIG_RESET_ACTIVE_LEVEL
+#define CONFIG_RESET_ACTIVE_LEVEL LOW
 #endif
 
 PriceState gState;
+AppSecrets gSecrets;
 uint32_t gLastFetchMs = 0;
 time_t gNextDailyFetch = 0;
 uint32_t gLastMinuteTick = 0;
 bool gPendingCatchUpRecheck = false;
 bool gNeedsOnlineInit = false;
 
+constexpr int kConfigResetPin = CONFIG_RESET_PIN;
+constexpr int kConfigResetActiveLevel = CONFIG_RESET_ACTIVE_LEVEL;
+
 const char *activeSourceLabel()
 {
   return "NORDPOOL";
+}
+
+bool resetButtonPressed()
+{
+  if (kConfigResetPin < 0)
+    return false;
+  return digitalRead(kConfigResetPin) == kConfigResetActiveLevel;
+}
+
+bool resetButtonHeld(uint32_t holdMs = kResetHoldMs)
+{
+  if (!resetButtonPressed())
+    return false;
+
+  uint32_t elapsed = 0;
+  while (elapsed < holdMs)
+  {
+    if (!resetButtonPressed())
+      return false;
+    delay(kResetPollIntervalMs);
+    elapsed += kResetPollIntervalMs;
+  }
+  return true;
+}
+
+void handleResetRequest()
+{
+  if (!resetButtonHeld())
+    return;
+
+  logf("Reset button held, clearing WiFi/config settings");
+  wifiResetSettings();
+  delay(250);
+  ESP.restart();
 }
 
 void logNextFetch(time_t nextFetch)
@@ -158,7 +193,8 @@ void applyFetchedState(const PriceState &fetched)
 void fetchAndRender()
 {
   logf("Fetch+render start");
-  applyFetchedState(fetchNordPoolPriceInfo(kNordPoolApiUrl, NORDPOOL_AREA, NORDPOOL_CURRENCY));
+  applyFetchedState(
+      fetchNordPoolPriceInfo(kNordPoolApiUrl, gSecrets.nordpoolArea.c_str(), gSecrets.nordpoolCurrency.c_str()));
   logf("Fetch+render done");
 }
 
@@ -273,7 +309,8 @@ void handleClockDrivenUpdates(time_t now)
   if (gNextDailyFetch != 0 && now >= gNextDailyFetch)
   {
     logf("Daily 13:00 fetch trigger");
-    const PriceState fetched = fetchNordPoolPriceInfo(kNordPoolApiUrl, NORDPOOL_AREA, NORDPOOL_CURRENCY);
+    const PriceState fetched =
+        fetchNordPoolPriceInfo(kNordPoolApiUrl, gSecrets.nordpoolArea.c_str(), gSecrets.nordpoolCurrency.c_str());
     if (!fetched.ok)
     {
       logf("Daily fetch failed, retry in %ld sec", (long)kRetryDailyIfUnchangedSec);
@@ -315,11 +352,22 @@ void setup()
   delay(200);
   logf("Boot");
 
+  if (kConfigResetPin >= 0)
+  {
+    if (kConfigResetActiveLevel == LOW)
+      pinMode(kConfigResetPin, INPUT_PULLUP);
+    else
+      pinMode(kConfigResetPin, INPUT_PULLDOWN);
+  }
+
+  handleResetRequest();
+
   displayInit();
+  loadAppSecrets(gSecrets);
 
   bool loadedFromCache = false;
   PriceState cached;
-  const bool wifiConnected = wifiConnect(WIFI_SSID, WIFI_PASSWORD, kWifiConnectTimeoutMs);
+  const bool wifiConnected = wifiConnectWithConfigPortal(gSecrets, kWifiPortalTimeoutSec);
 
   if (!wifiConnected)
   {
@@ -374,7 +422,9 @@ void setup()
 
 void loop()
 {
-  if (WiFi.status() != WL_CONNECTED && !wifiConnect(WIFI_SSID, WIFI_PASSWORD, kWifiConnectTimeoutMs))
+  handleResetRequest();
+
+  if (WiFi.status() != WL_CONNECTED && !wifiReconnect(kWifiConnectTimeoutMs))
   {
     if (gState.ok)
     {
@@ -401,6 +451,7 @@ void loop()
   {
     logf("WiFi restored, running online init");
     gNeedsOnlineInit = false;
+    loadAppSecrets(gSecrets);
     syncClock(kTimezoneSpec);
     scheduleDailyFetch(time(nullptr));
     fetchAndRender();

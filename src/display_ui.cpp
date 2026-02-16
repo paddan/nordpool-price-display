@@ -438,6 +438,14 @@ namespace
       tft.drawString(dayText, x, kDayLabelY);
     }
   }
+
+  void drawCenteredLine(const String &text, int y, int font, uint16_t color)
+  {
+    tft.setTextDatum(MC_DATUM);
+    tft.setTextFont(font);
+    tft.setTextColor(color, TFT_BLACK);
+    tft.drawString(text, kScreenCenterX, y);
+  }
 } // namespace
 
 void displayInit()
@@ -494,4 +502,34 @@ void displayDrawPrices(const PriceState &state)
   drawYAxis(range, xAxisY, drawableH);
   drawBars(state, range, bands, xAxisY, drawableH);
   drawRunningAverage(state, range, xAxisY, drawableH);
+}
+
+void displayDrawWifiConfigPortal(const char *apName, uint16_t timeoutSeconds)
+{
+  const String ap = (apName != nullptr && apName[0] != '\0') ? String(apName) : String("ElMeter");
+  char timeoutBuf[24];
+  snprintf(timeoutBuf, sizeof(timeoutBuf), "Portal timeout: %us", (unsigned)timeoutSeconds);
+
+  tft.fillScreen(TFT_BLACK);
+  tft.setTextWrap(false);
+  drawCenteredLine("Wi-Fi Setup Mode", 20, 4, TFT_CYAN);
+  drawCenteredLine("1) Connect phone/computer to:", 58, 2, TFT_LIGHTGREY);
+  drawCenteredLine(ap, 80, 2, TFT_WHITE);
+  drawCenteredLine("2) Open: 192.168.4.1", 108, 2, TFT_LIGHTGREY);
+  drawCenteredLine("3) Select Wi-Fi and Save", 130, 2, TFT_LIGHTGREY);
+  drawCenteredLine("4) Select Nord Pool area", 152, 2, TFT_LIGHTGREY);
+  drawCenteredLine("   and currency", 170, 2, TFT_LIGHTGREY);
+  drawCenteredLine(String(timeoutBuf), 194, 2, TFT_YELLOW);
+}
+
+void displayDrawWifiConfigTimeout(uint16_t timeoutSeconds)
+{
+  char timeoutBuf[40];
+  snprintf(timeoutBuf, sizeof(timeoutBuf), "Timed out after %us", (unsigned)timeoutSeconds);
+
+  tft.fillScreen(TFT_BLACK);
+  tft.setTextWrap(false);
+  drawCenteredLine("Wi-Fi Setup Timed Out", 74, 4, TFT_RED);
+  drawCenteredLine(String(timeoutBuf), 108, 2, TFT_LIGHTGREY);
+  drawCenteredLine("Press reset or reboot to retry", 136, 2, TFT_LIGHTGREY);
 }
