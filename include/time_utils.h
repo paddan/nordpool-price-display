@@ -7,6 +7,8 @@ struct PriceState;
 
 uint16_t normalizeResolutionMinutes(uint16_t resolutionMinutes);
 bool isValidClock(time_t now, time_t validEpochMin);
+bool formatDateYmd(time_t ts, char *out, size_t outSize);
+String utcIsoToLocalIsoSlot(const String &utcIso);
 String intervalKeyFromIso(const String &iso, uint16_t resolutionMinutes);
 String currentIntervalKey(uint16_t resolutionMinutes);
 int findPricePointIndexForInterval(const PriceState &state, const String &intervalKey, uint16_t resolutionMinutes);

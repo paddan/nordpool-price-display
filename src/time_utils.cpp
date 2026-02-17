@@ -18,6 +18,63 @@ bool parseTwoDigits(const char *chars, int &out) {
   return true;
 }
 
+bool parseFourDigits(const char *chars, int &out) {
+  if (!isdigit((unsigned char)chars[0]) || !isdigit((unsigned char)chars[1]) ||
+      !isdigit((unsigned char)chars[2]) || !isdigit((unsigned char)chars[3])) {
+    return false;
+  }
+  out = ((chars[0] - '0') * 1000) + ((chars[1] - '0') * 100) + ((chars[2] - '0') * 10) + (chars[3] - '0');
+  return true;
+}
+
+bool parseUtcIso(const String &iso, struct tm &tmUtc) {
+  if (iso.length() < 19) return false;
+
+  const char *s = iso.c_str();
+  if (s[4] != '-' || s[7] != '-' || s[10] != 'T' || s[13] != ':' || s[16] != ':') {
+    return false;
+  }
+
+  int year = 0;
+  int month = 0;
+  int day = 0;
+  int hour = 0;
+  int minute = 0;
+  int second = 0;
+  if (!parseFourDigits(&s[0], year) || !parseTwoDigits(&s[5], month) || !parseTwoDigits(&s[8], day) ||
+      !parseTwoDigits(&s[11], hour) || !parseTwoDigits(&s[14], minute) || !parseTwoDigits(&s[17], second)) {
+    return false;
+  }
+
+  tmUtc = {};
+  tmUtc.tm_year = year - 1900;
+  tmUtc.tm_mon = month - 1;
+  tmUtc.tm_mday = day;
+  tmUtc.tm_hour = hour;
+  tmUtc.tm_min = minute;
+  tmUtc.tm_sec = second;
+  return true;
+}
+
+int64_t daysFromCivil(int year, unsigned month, unsigned day) {
+  year -= (month <= 2);
+  const int era = (year >= 0 ? year : year - 399) / 400;
+  const unsigned yoe = (unsigned)(year - era * 400);                              // [0, 399]
+  const unsigned doy = (153 * (month + (month > 2 ? -3 : 9)) + 2) / 5 + day - 1; // [0, 365]
+  const unsigned doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;                     // [0, 146096]
+  return era * 146097 + (int64_t)doe - 719468;
+}
+
+time_t utcToEpochSeconds(const struct tm &tmUtc) {
+  const int year = tmUtc.tm_year + 1900;
+  const unsigned month = (unsigned)tmUtc.tm_mon + 1;
+  const unsigned day = (unsigned)tmUtc.tm_mday;
+  const int64_t days = daysFromCivil(year, month, day);
+  const int64_t sec = days * 86400 + (int64_t)tmUtc.tm_hour * 3600 + (int64_t)tmUtc.tm_min * 60 + tmUtc.tm_sec;
+  if (sec < 0) return 0;
+  return (time_t)sec;
+}
+
 String dateKeyFromTime(time_t when, time_t validEpochMin) {
   if (!isValidClock(when, validEpochMin)) return "";
 
@@ -48,6 +105,27 @@ uint16_t normalizeResolutionMinutes(uint16_t resolutionMinutes) {
 
 bool isValidClock(time_t now, time_t validEpochMin) {
   return now > validEpochMin;
+}
+
+bool formatDateYmd(time_t ts, char *out, size_t outSize) {
+  struct tm localTm;
+  if (!localtime_r(&ts, &localTm)) return false;
+  return strftime(out, outSize, "%Y-%m-%d", &localTm) > 0;
+}
+
+String utcIsoToLocalIsoSlot(const String &utcIso) {
+  struct tm tmUtc;
+  if (!parseUtcIso(utcIso, tmUtc)) return utcIso;
+
+  const time_t epochUtc = utcToEpochSeconds(tmUtc);
+  if (epochUtc <= 0) return utcIso;
+
+  struct tm localTm;
+  if (!localtime_r(&epochUtc, &localTm)) return utcIso;
+
+  char out[32];
+  strftime(out, sizeof(out), "%Y-%m-%dT%H:%M:00", &localTm);
+  return String(out);
 }
 
 const char *timezoneSpecForNordpoolArea(const String &area) {
