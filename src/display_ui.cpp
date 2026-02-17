@@ -1,6 +1,8 @@
 #include <Arduino.h>
+#include <ctype.h>
 #include <math.h>
 #include <stdint.h>
+#include <string.h>
 #include <time.h>
 #include <OpenFontRender.h>
 #include <TFT_eSPI.h>
@@ -53,21 +55,41 @@ namespace
   constexpr int kSourceLabelY = 2;
   constexpr uint16_t kAverageLineColor = TFT_CYAN;
 
-  String formatPriceValue(float value)
+  void formatPriceValue(float value, char *out, size_t outSize)
   {
-    char buf[16];
-    snprintf(buf, sizeof(buf), "%.2f", value);
-    return String(buf);
+    if (outSize == 0)
+      return;
+    snprintf(out, outSize, "%.2f", value);
   }
 
-  String formatCurrencyLabel(const String &currency)
+  void formatCurrencyLabel(const String &currency, char *out, size_t outSize)
   {
-    String label = currency;
-    label.trim();
-    label.toUpperCase();
-    if (label.isEmpty())
-      label = "SEK";
-    return label;
+    if (outSize == 0)
+      return;
+
+    const char *src = currency.c_str();
+    const size_t len = strlen(src);
+    size_t start = 0;
+    while (start < len && isspace((unsigned char)src[start]))
+      ++start;
+    size_t end = len;
+    while (end > start && isspace((unsigned char)src[end - 1]))
+      --end;
+
+    size_t j = 0;
+    for (size_t i = start; i < end && j < (outSize - 1); ++i)
+    {
+      unsigned char c = (unsigned char)src[i];
+      if (c >= 'a' && c <= 'z')
+        c = (unsigned char)(c - ('a' - 'A'));
+      out[j++] = (char)c;
+    }
+    out[j] = '\0';
+
+    if (j == 0)
+    {
+      snprintf(out, outSize, "SEK");
+    }
   }
 
   uint16_t levelColor(const String &level)
@@ -103,8 +125,10 @@ namespace
 
   void drawPriceText(float priceValue, const String &currency, uint16_t color)
   {
-    const String priceText = formatPriceValue(priceValue);
-    const String currencyText = formatCurrencyLabel(currency);
+    char priceText[16];
+    char currencyText[8];
+    formatPriceValue(priceValue, priceText, sizeof(priceText));
+    formatCurrencyLabel(currency, currencyText, sizeof(currencyText));
 
     if (gOpenFontReady)
     {
@@ -112,11 +136,11 @@ namespace
       ofr.setAlignment(Align::MiddleLeft);
 
       ofr.setFontSize(kPriceFontSize);
-      const int priceWidth = (int)ofr.getTextWidth("%s", priceText.c_str());
-      const int priceHeight = (int)ofr.getTextHeight("%s", priceText.c_str());
+      const int priceWidth = (int)ofr.getTextWidth("%s", priceText);
+      const int priceHeight = (int)ofr.getTextHeight("%s", priceText);
       ofr.setFontSize(kCurrencyFontSize);
-      const int currencyWidth = (int)ofr.getTextWidth("%s", currencyText.c_str());
-      const int currencyHeight = (int)ofr.getTextHeight("%s", currencyText.c_str());
+      const int currencyWidth = (int)ofr.getTextWidth("%s", currencyText);
+      const int currencyHeight = (int)ofr.getTextHeight("%s", currencyText);
 
       const int totalWidth = priceWidth + kPriceCurrencyGapPx + currencyWidth;
       const int startX = kScreenCenterX - (totalWidth / 2);
@@ -125,11 +149,11 @@ namespace
 
       ofr.setFontSize(kPriceFontSize);
       ofr.setCursor(startX, priceY);
-      ofr.printf("%s", priceText.c_str());
+      ofr.printf("%s", priceText);
 
       ofr.setFontSize(kCurrencyFontSize);
       ofr.setCursor(startX + priceWidth + kPriceCurrencyGapPx, currencyY);
-      ofr.printf("%s", currencyText.c_str());
+      ofr.printf("%s", currencyText);
       return;
     }
 
@@ -356,16 +380,14 @@ namespace
 
   void drawClockLabel()
   {
-    String text = "--:--";
+    char text[6] = "--:--";
     const time_t now = time(nullptr);
     if (now > 1700000000)
     {
       struct tm tmNow;
       if (localtime_r(&now, &tmNow))
       {
-        char buf[8];
-        strftime(buf, sizeof(buf), "%H:%M", &tmNow);
-        text = String(buf);
+        strftime(text, sizeof(text), "%H:%M", &tmNow);
       }
     }
 
@@ -386,7 +408,7 @@ namespace
       snprintf(label, sizeof(label), "%.1f", value);
       tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
       tft.setTextDatum(MR_DATUM);
-      tft.drawString(String(label), kChartX - 3, y);
+      tft.drawString(label, kChartX - 3, y);
     };
 
     const int yTop = xAxisY - drawableH;
@@ -411,7 +433,7 @@ namespace
       snprintf(label, sizeof(label), "%d", (int)roundf(tick));
       tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
       tft.setTextDatum(MR_DATUM);
-      tft.drawString(String(label), kAxisLabelX, yTick);
+      tft.drawString(label, kAxisLabelX, yTick);
     }
 
     tft.drawFastHLine(kChartX - 8, yBottom, 8, TFT_DARKGREY);
@@ -441,7 +463,7 @@ namespace
     snprintf(label, sizeof(label), "%.1f", state.runningAverage);
     tft.setTextColor(kAverageLineColor, TFT_BLACK);
     tft.setTextDatum(MR_DATUM);
-    tft.drawString(String(label), kAxisLabelX, yAvg);
+    tft.drawString(label, kAxisLabelX, yAvg);
     tft.setTextDatum(TL_DATUM);
   }
 
@@ -471,7 +493,8 @@ namespace
 
   void drawBars(const PriceState &state, const ChartRange &range, const LevelBand bands[5], int xAxisY, int drawableH)
   {
-    String lastDay = "";
+    char lastDay[11] = {0};
+    bool hasLastDay = false;
     const int pointCount = (int)state.count;
     for (size_t i = 0; i < state.count; ++i)
     {
@@ -495,24 +518,40 @@ namespace
 
       if (p.startsAt.length() < 10)
         continue;
-      const String day = p.startsAt.substring(0, 10);
-      if (day == lastDay)
+      const char *startsAt = p.startsAt.c_str();
+      char dayKey[11];
+      memcpy(dayKey, startsAt, 10);
+      dayKey[10] = '\0';
+      if (hasLastDay && strncmp(dayKey, lastDay, 10) == 0)
         continue;
 
-      lastDay = day;
-      const String dayText = p.startsAt.substring(8, 10) + "/" + p.startsAt.substring(5, 7);
+      memcpy(lastDay, dayKey, sizeof(lastDay));
+      hasLastDay = true;
+
+      char dayText[6];
+      dayText[0] = startsAt[8];
+      dayText[1] = startsAt[9];
+      dayText[2] = '/';
+      dayText[3] = startsAt[5];
+      dayText[4] = startsAt[6];
+      dayText[5] = '\0';
       tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
       tft.setTextFont(kTopXAxisFontSize);
       tft.drawString(dayText, x, kDayLabelY);
     }
   }
 
-  void drawCenteredLine(const String &text, int y, int font, uint16_t color)
+  void drawCenteredLine(const char *text, int y, int font, uint16_t color)
   {
     tft.setTextDatum(MC_DATUM);
     tft.setTextFont(font);
     tft.setTextColor(color, TFT_BLACK);
-    tft.drawString(text, kScreenCenterX, y);
+    tft.drawString((text != nullptr) ? text : "", kScreenCenterX, y);
+  }
+
+  void drawCenteredLine(const String &text, int y, int font, uint16_t color)
+  {
+    drawCenteredLine(text.c_str(), y, font, color);
   }
 } // namespace
 
@@ -574,7 +613,7 @@ void displayDrawPrices(const PriceState &state)
 
 void displayDrawWifiConfigPortal(const char *apName, uint16_t timeoutSeconds)
 {
-  const String ap = (apName != nullptr && apName[0] != '\0') ? String(apName) : String("ElMeter");
+  const char *ap = (apName != nullptr && apName[0] != '\0') ? apName : "ElMeter";
   char timeoutBuf[24];
   snprintf(timeoutBuf, sizeof(timeoutBuf), "Portal timeout: %us", (unsigned)timeoutSeconds);
 
@@ -587,7 +626,7 @@ void displayDrawWifiConfigPortal(const char *apName, uint16_t timeoutSeconds)
   drawCenteredLine("3) Select Wi-Fi and Save", 130, 2, TFT_LIGHTGREY);
   drawCenteredLine("4) Select Nord Pool area,", 152, 2, TFT_LIGHTGREY);
   drawCenteredLine("   currency, and resolution", 170, 2, TFT_LIGHTGREY);
-  drawCenteredLine(String(timeoutBuf), 194, 2, TFT_YELLOW);
+  drawCenteredLine(timeoutBuf, 194, 2, TFT_YELLOW);
 }
 
 void displayDrawWifiConfigTimeout(uint16_t timeoutSeconds)
@@ -598,6 +637,6 @@ void displayDrawWifiConfigTimeout(uint16_t timeoutSeconds)
   tft.fillScreen(TFT_BLACK);
   tft.setTextWrap(false);
   drawCenteredLine("Wi-Fi Setup Timed Out", 74, 4, TFT_RED);
-  drawCenteredLine(String(timeoutBuf), 108, 2, TFT_LIGHTGREY);
+  drawCenteredLine(timeoutBuf, 108, 2, TFT_LIGHTGREY);
   drawCenteredLine("Press reset or reboot to retry", 136, 2, TFT_LIGHTGREY);
 }

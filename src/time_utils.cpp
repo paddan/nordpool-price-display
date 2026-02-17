@@ -1,11 +1,22 @@
 #include "time_utils.h"
 
+#include <ctype.h>
+#include <string.h>
+
 #include "app_types.h"
 #include "logging_utils.h"
 
 namespace {
 constexpr char kTimezoneCetCest[] = "CET-1CEST,M3.5.0/2,M10.5.0/3";
 constexpr char kTimezoneEetEest[] = "EET-2EEST,M3.5.0/3,M10.5.0/4";
+
+bool parseTwoDigits(const char *chars, int &out) {
+  if (!isdigit((unsigned char)chars[0]) || !isdigit((unsigned char)chars[1])) {
+    return false;
+  }
+  out = ((chars[0] - '0') * 10) + (chars[1] - '0');
+  return true;
+}
 }  // namespace
 
 uint16_t normalizeResolutionMinutes(uint16_t resolutionMinutes) {
@@ -26,15 +37,21 @@ String intervalKeyFromIso(const String &iso, uint16_t resolutionMinutes) {
   if (iso.length() < 13) return "";
 
   const uint16_t normalizedResolution = normalizeResolutionMinutes(resolutionMinutes);
+  const char *isoChars = iso.c_str();
+  char key[20];
+
   if (normalizedResolution >= 60 || iso.length() < 16) {
-    return iso.substring(0, 13);
+    memcpy(key, isoChars, 13);
+    key[13] = '\0';
+    return String(key);
   }
 
-  const int minute = iso.substring(14, 16).toInt();
+  int minute = 0;
+  if (!parseTwoDigits(&isoChars[14], minute)) {
+    minute = 0;
+  }
   const int slotMinute = minute - (minute % normalizedResolution);
-  const String hourPrefix = iso.substring(0, 13);
-  char key[20];
-  snprintf(key, sizeof(key), "%s:%02d", hourPrefix.c_str(), slotMinute);
+  snprintf(key, sizeof(key), "%.13s:%02d", isoChars, slotMinute);
   return String(key);
 }
 

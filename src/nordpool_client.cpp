@@ -4,6 +4,7 @@
 #include <SPIFFS.h>
 #include <WiFi.h>
 #include <WiFiClientSecure.h>
+#include <ctype.h>
 #include <math.h>
 #include <stdint.h>
 #include <string.h>
@@ -49,13 +50,43 @@ bool formatDate(time_t ts, char *out, size_t outSize) {
 bool parseUtcIso(const String &iso, struct tm &tmUtc) {
   if (iso.length() < 19) return false;
 
+  const char *s = iso.c_str();
+  auto parse2 = [](const char *p, int &out) -> bool {
+    if (!isdigit((unsigned char)p[0]) || !isdigit((unsigned char)p[1])) return false;
+    out = ((p[0] - '0') * 10) + (p[1] - '0');
+    return true;
+  };
+  auto parse4 = [](const char *p, int &out) -> bool {
+    if (!isdigit((unsigned char)p[0]) || !isdigit((unsigned char)p[1]) ||
+        !isdigit((unsigned char)p[2]) || !isdigit((unsigned char)p[3])) {
+      return false;
+    }
+    out = ((p[0] - '0') * 1000) + ((p[1] - '0') * 100) + ((p[2] - '0') * 10) + (p[3] - '0');
+    return true;
+  };
+
+  if (s[4] != '-' || s[7] != '-' || s[10] != 'T' || s[13] != ':' || s[16] != ':') {
+    return false;
+  }
+
+  int year = 0;
+  int month = 0;
+  int day = 0;
+  int hour = 0;
+  int minute = 0;
+  int second = 0;
+  if (!parse4(&s[0], year) || !parse2(&s[5], month) || !parse2(&s[8], day) ||
+      !parse2(&s[11], hour) || !parse2(&s[14], minute) || !parse2(&s[17], second)) {
+    return false;
+  }
+
   tmUtc = {};
-  tmUtc.tm_year = iso.substring(0, 4).toInt() - 1900;
-  tmUtc.tm_mon = iso.substring(5, 7).toInt() - 1;
-  tmUtc.tm_mday = iso.substring(8, 10).toInt();
-  tmUtc.tm_hour = iso.substring(11, 13).toInt();
-  tmUtc.tm_min = iso.substring(14, 16).toInt();
-  tmUtc.tm_sec = iso.substring(17, 19).toInt();
+  tmUtc.tm_year = year - 1900;
+  tmUtc.tm_mon = month - 1;
+  tmUtc.tm_mday = day;
+  tmUtc.tm_hour = hour;
+  tmUtc.tm_min = minute;
+  tmUtc.tm_sec = second;
 
   return true;
 }
@@ -212,7 +243,7 @@ String utcIsoToLocalIsoSlot(const String &utcIso) {
   return String(out);
 }
 
-bool addPoints(JsonArray arr, const String &area, PriceState &state) {
+bool addPoints(JsonArray arr, const char *area, PriceState &state) {
   if (arr.isNull()) return false;
 
   bool added = false;
@@ -251,9 +282,16 @@ bool fetchDate(
     PriceState &out
 ) {
   const uint16_t normalizedResolution = normalizeResolutionMinutes(resolutionMinutes);
-  const String url =
-      String(apiBaseUrl) + "?date=" + String(date) + "&market=DayAhead&indexNames=" + String(area) +
-      "&currency=" + String(currency) + "&resolutionInMinutes=" + String(normalizedResolution);
+  char url[256];
+  snprintf(
+      url,
+      sizeof(url),
+      "%s?date=%s&market=DayAhead&indexNames=%s&currency=%s&resolutionInMinutes=%u",
+      apiBaseUrl,
+      date,
+      area,
+      currency,
+      (unsigned)normalizedResolution);
 
   http.useHTTP10(true);
   http.setReuse(false);
@@ -275,20 +313,20 @@ bool fetchDate(
     return false;
   }
 
-  const String payload = http.getString();
-  if (payload.length() == 0) {
-    out.error = "Empty response body";
-    http.end();
-    return false;
-  }
-
+  JsonDocument filter;
+  filter["title"] = true;
+  filter["currency"] = true;
+  JsonArray entriesFilter = filter["multiIndexEntries"].to<JsonArray>();
+  JsonObject entryFilter = entriesFilter.add<JsonObject>();
+  entryFilter["deliveryStart"] = true;
+  entryFilter["entryPerArea"][area] = true;
   JsonDocument doc;
-  const DeserializationError err = deserializeJson(doc, payload);
+  const DeserializationError err =
+      deserializeJson(doc, http.getStream(), DeserializationOption::Filter(filter));
   http.end();
   if (err) {
-    out.error = "JSON parse failed";
-    const String preview = payload.substring(0, 120);
-    logf("Nord Pool JSON parse error: %s body[0..120]=%s", err.c_str(), preview.c_str());
+    out.error = (err == DeserializationError::EmptyInput) ? "Empty response body" : "JSON parse failed";
+    logf("Nord Pool JSON parse error: %s", err.c_str());
     return false;
   }
 
@@ -301,7 +339,7 @@ bool fetchDate(
     out.currency = String((const char *)(doc["currency"] | currency));
   }
 
-  addPoints(doc["multiIndexEntries"], String(area), out);
+  addPoints(doc["multiIndexEntries"], area, out);
   return true;
 }
 
