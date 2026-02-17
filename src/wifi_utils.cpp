@@ -6,6 +6,7 @@
 
 #include "display_ui.h"
 #include "logging_utils.h"
+#include "time_utils.h"
 #include "wifi_utils.h"
 
 namespace {
@@ -77,13 +78,6 @@ constexpr char kPortalCustomHead[] PROGMEM = R"HTML(
 })();
 </script>
 )HTML";
-
-uint16_t normalizeResolutionMinutes(uint16_t value) {
-  if (value == 15 || value == 30 || value == 60) {
-    return value;
-  }
-  return kDefaultNordpoolResolutionMinutes;
-}
 
 bool isAllowedToken(const String &value, const char *const *allowedValues, size_t allowedCount) {
   for (size_t i = 0; i < allowedCount; ++i) {

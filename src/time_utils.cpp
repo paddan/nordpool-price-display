@@ -1,10 +1,12 @@
 #include "time_utils.h"
 
+#include "app_types.h"
 #include "logging_utils.h"
 
 namespace {
 constexpr char kTimezoneCetCest[] = "CET-1CEST,M3.5.0/2,M10.5.0/3";
 constexpr char kTimezoneEetEest[] = "EET-2EEST,M3.5.0/3,M10.5.0/4";
+}  // namespace
 
 uint16_t normalizeResolutionMinutes(uint16_t resolutionMinutes) {
   if (resolutionMinutes == 15 || resolutionMinutes == 30 || resolutionMinutes == 60) {
@@ -12,7 +14,6 @@ uint16_t normalizeResolutionMinutes(uint16_t resolutionMinutes) {
   }
   return 60;
 }
-}  // namespace
 
 const char *timezoneSpecForNordpoolArea(const String &area) {
   if (area == "FI" || area == "EE" || area == "LV" || area == "LT") {
@@ -55,6 +56,22 @@ String currentIntervalKey(uint16_t resolutionMinutes) {
     snprintf(key, sizeof(key), "%s:%02d", hourPrefix, slotMinute);
   }
   return String(key);
+}
+
+int findPricePointIndexForInterval(const PriceState &state, const String &intervalKey, uint16_t resolutionMinutes) {
+  if (intervalKey.isEmpty()) return -1;
+  for (size_t i = 0; i < state.count; ++i) {
+    if (intervalKeyFromIso(state.points[i].startsAt, resolutionMinutes) == intervalKey) {
+      return (int)i;
+    }
+  }
+  return -1;
+}
+
+int findCurrentPricePointIndex(const PriceState &state, uint16_t resolutionMinutes) {
+  const String key = currentIntervalKey(resolutionMinutes);
+  if (key.isEmpty()) return -1;
+  return findPricePointIndexForInterval(state, key, resolutionMinutes);
 }
 
 String hourKeyFromIso(const String &iso) {

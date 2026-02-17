@@ -40,11 +40,6 @@ float applyCustomPriceFormula(float rawPriceKrPerKwh) {
   return adjustedOre / 100.0f;
 }
 
-String classifyLevel(float priceKrPerKwh) {
-  (void)priceKrPerKwh;
-  return "UNKNOWN";
-}
-
 bool formatDate(time_t ts, char *out, size_t outSize) {
   struct tm localTm;
   if (!localtime_r(&ts, &localTm)) return false;
@@ -63,13 +58,6 @@ bool parseUtcIso(const String &iso, struct tm &tmUtc) {
   tmUtc.tm_sec = iso.substring(17, 19).toInt();
 
   return true;
-}
-
-uint16_t normalizeResolutionMinutes(uint16_t resolutionMinutes) {
-  if (resolutionMinutes == 15 || resolutionMinutes == 30 || resolutionMinutes == 60) {
-    return resolutionMinutes;
-  }
-  return 60;
 }
 
 uint16_t movingAverageWindowForResolution(uint16_t resolutionMinutes) {
@@ -245,7 +233,7 @@ bool addPoints(JsonArray arr, const String &area, PriceState &state) {
     PricePoint &p = state.points[state.count++];
     p.startsAt = utcIsoToLocalIsoSlot(String((const char *)(item["deliveryStart"] | "")));
     p.price = adjustedPrice;
-    p.level = classifyLevel(adjustedPrice);
+    p.level = "UNKNOWN";
     added = true;
   }
 
@@ -318,17 +306,7 @@ bool fetchDate(
 }
 
 void assignCurrentFromClock(PriceState &out) {
-  const String key = currentIntervalKey(out.resolutionMinutes);
-  if (key.isEmpty()) return;
-
-  out.currentIndex = -1;
-  for (size_t i = 0; i < out.count; ++i) {
-    if (intervalKeyFromIso(out.points[i].startsAt, out.resolutionMinutes) == key) {
-      out.currentIndex = (int)i;
-      break;
-    }
-  }
-
+  out.currentIndex = findCurrentPricePointIndex(out, out.resolutionMinutes);
   if (out.currentIndex < 0) return;
 
   const PricePoint &point = out.points[out.currentIndex];

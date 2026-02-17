@@ -22,18 +22,6 @@ bool ensureSpiffsMounted() {
   return mounted;
 }
 
-int findCurrentIndex(const PriceState &state) {
-  const String key = currentIntervalKey(state.resolutionMinutes);
-  if (key.isEmpty()) return -1;
-
-  for (size_t i = 0; i < state.count; ++i) {
-    if (intervalKeyFromIso(state.points[i].startsAt, state.resolutionMinutes) == key) {
-      return (int)i;
-    }
-  }
-  return -1;
-}
-
 void applyCurrentFromIndex(PriceState &state, int idx) {
   if (idx < 0 || idx >= (int)state.count) return;
 
@@ -88,7 +76,7 @@ bool priceCacheLoadInternal(const char *expectedSource, bool requireCurrentHour,
 
   if (out.count == 0) return false;
 
-  int idx = findCurrentIndex(out);
+  int idx = findCurrentPricePointIndex(out, out.resolutionMinutes);
   if (idx < 0) {
     if (requireCurrentHour) {
       // Cache exists but does not cover current interval.

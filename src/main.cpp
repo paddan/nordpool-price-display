@@ -265,24 +265,35 @@ bool wouldReduceCoverage(const PriceState &fetched, const PriceState &current)
   return dayCount(fetched) < dayCount(current);
 }
 
+bool applyLoadedCacheState(const PriceState &cacheState, const char *cacheLabel, bool saveBackToCache)
+{
+  if (cacheState.resolutionMinutes != gSecrets.nordpoolResolutionMinutes)
+  {
+    logf(
+        "Using %s cache with different resolution: cache=%u configured=%u",
+        cacheLabel,
+        (unsigned)cacheState.resolutionMinutes,
+        (unsigned)gSecrets.nordpoolResolutionMinutes);
+  }
+
+  gState = cacheState;
+  if (saveBackToCache && !priceCacheSave(gState))
+  {
+    logf("Price cache save failed");
+  }
+
+  displayDrawPrices(gState);
+  logf("Loaded %s prices from cache: points=%u", cacheLabel, (unsigned)gState.count);
+  gPendingCatchUpRecheck = true;
+  return true;
+}
+
 void updateCurrentHourFromClock()
 {
   if (!gState.ok || gState.count == 0)
     return;
 
-  const String key = currentIntervalKey(gSecrets.nordpoolResolutionMinutes);
-  if (key.isEmpty())
-    return;
-
-  int idx = -1;
-  for (size_t i = 0; i < gState.count; ++i)
-  {
-    if (intervalKeyFromIso(gState.points[i].startsAt, gSecrets.nordpoolResolutionMinutes) == key)
-    {
-      idx = (int)i;
-      break;
-    }
-  }
+  const int idx = findCurrentPricePointIndex(gState, gSecrets.nordpoolResolutionMinutes);
   if (idx < 0 || idx == gState.currentIndex)
     return;
 
@@ -412,37 +423,11 @@ void setup()
 
   if (priceCacheLoadIfCurrent(activeSourceLabel(), gCacheBuffer))
   {
-    if (gCacheBuffer.resolutionMinutes != gSecrets.nordpoolResolutionMinutes)
-    {
-      logf(
-          "Using current cache with different resolution: cache=%u configured=%u",
-          (unsigned)gCacheBuffer.resolutionMinutes,
-          (unsigned)gSecrets.nordpoolResolutionMinutes);
-    }
-    gState = gCacheBuffer;
-    if (!priceCacheSave(gState))
-    {
-      logf("Price cache save failed");
-    }
-    displayDrawPrices(gState);
-    logf("Loaded current prices from cache: points=%u", (unsigned)gState.count);
-    loadedFromCache = true;
-    gPendingCatchUpRecheck = true;
+    loadedFromCache = applyLoadedCacheState(gCacheBuffer, "current", true);
   }
   else if (priceCacheLoadIfAvailable(activeSourceLabel(), gCacheBuffer))
   {
-    if (gCacheBuffer.resolutionMinutes != gSecrets.nordpoolResolutionMinutes)
-    {
-      logf(
-          "Using available cache with different resolution: cache=%u configured=%u",
-          (unsigned)gCacheBuffer.resolutionMinutes,
-          (unsigned)gSecrets.nordpoolResolutionMinutes);
-    }
-    gState = gCacheBuffer;
-    displayDrawPrices(gState);
-    logf("Loaded available prices from cache: points=%u", (unsigned)gState.count);
-    loadedFromCache = true;
-    gPendingCatchUpRecheck = true;
+    loadedFromCache = applyLoadedCacheState(gCacheBuffer, "available", false);
   }
 
   if (!loadedFromCache)
