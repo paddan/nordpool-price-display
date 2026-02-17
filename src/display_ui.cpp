@@ -1,6 +1,7 @@
 #include <Arduino.h>
 #include <math.h>
 #include <stdint.h>
+#include <time.h>
 #include <OpenFontRender.h>
 #include <TFT_eSPI.h>
 
@@ -23,10 +24,12 @@ namespace
   // - Increase Y => move down, decrease Y => move up
   // - Increase W/H/font size => make larger
 
-  // Big price ("2.22 kr") position and size.
+  // Big price ("2.22 SEK") position and size.
   constexpr int kScreenCenterX = 160; // Center X for the big price text.
   constexpr int kPriceCenterY = 44;   // Center Y for the big price text.
   constexpr int kPriceFontSize = 86;  // Big price font size (OpenFontRender pixels).
+  constexpr int kCurrencyFontSize = kPriceFontSize / 2;
+  constexpr int kPriceCurrencyGapPx = 8;
 
   // Chart rectangle (outer graph area).
   constexpr int kChartX = 30;  // Left edge of graph area.
@@ -47,14 +50,24 @@ namespace
   constexpr int kYAxisFontSize = 1;    // Y-axis labels/ticks text scale.
   constexpr int kTopXAxisFontSize = 1; // Day labels text scale.
   constexpr int kSourceLabelX = 316;
-  constexpr int kSourceLabelY = 4;
+  constexpr int kSourceLabelY = 2;
   constexpr uint16_t kAverageLineColor = TFT_CYAN;
 
-  String formatPrice(float value)
+  String formatPriceValue(float value)
   {
-    char buf[24];
-    snprintf(buf, sizeof(buf), "%.2f kr", value);
+    char buf[16];
+    snprintf(buf, sizeof(buf), "%.2f", value);
     return String(buf);
+  }
+
+  String formatCurrencyLabel(const String &currency)
+  {
+    String label = currency;
+    label.trim();
+    label.toUpperCase();
+    if (label.isEmpty())
+      label = "SEK";
+    return label;
   }
 
   uint16_t levelColor(const String &level)
@@ -88,25 +101,68 @@ namespace
 #endif
   }
 
-  void drawPriceText(const String &priceText, uint16_t color)
+  void drawPriceText(float priceValue, const String &currency, uint16_t color)
   {
+    const String priceText = formatPriceValue(priceValue);
+    const String currencyText = formatCurrencyLabel(currency);
+
     if (gOpenFontReady)
     {
       ofr.setFontColor(color, TFT_BLACK);
+      ofr.setAlignment(Align::MiddleLeft);
+
       ofr.setFontSize(kPriceFontSize);
-      ofr.setAlignment(Align::MiddleCenter);
-      ofr.setCursor(kScreenCenterX, kPriceCenterY);
+      const int priceWidth = (int)ofr.getTextWidth("%s", priceText.c_str());
+      const int priceHeight = (int)ofr.getTextHeight("%s", priceText.c_str());
+      ofr.setFontSize(kCurrencyFontSize);
+      const int currencyWidth = (int)ofr.getTextWidth("%s", currencyText.c_str());
+      const int currencyHeight = (int)ofr.getTextHeight("%s", currencyText.c_str());
+
+      const int totalWidth = priceWidth + kPriceCurrencyGapPx + currencyWidth;
+      const int startX = kScreenCenterX - (totalWidth / 2);
+      const int priceY = kPriceCenterY;
+      const int currencyY = kPriceCenterY + ((priceHeight - currencyHeight) / 2);
+
+      ofr.setFontSize(kPriceFontSize);
+      ofr.setCursor(startX, priceY);
       ofr.printf("%s", priceText.c_str());
+
+      ofr.setFontSize(kCurrencyFontSize);
+      ofr.setCursor(startX + priceWidth + kPriceCurrencyGapPx, currencyY);
+      ofr.printf("%s", currencyText.c_str());
       return;
     }
 
     // Fallback if smooth font is unavailable.
-    tft.setTextDatum(MC_DATUM);
+    tft.setTextDatum(TL_DATUM);
     tft.setTextColor(color, TFT_BLACK);
+
     tft.setTextFont(4);
     tft.setTextSize(3);
-    tft.drawString(priceText, kScreenCenterX, kPriceCenterY);
+
+    const int priceWidth = tft.textWidth(priceText);
+    const int priceHeight = tft.fontHeight();
+
+    tft.setTextFont(2);
+    tft.setTextSize(2);
+    const int currencyWidth = tft.textWidth(currencyText);
+    const int currencyHeight = tft.fontHeight();
+
+    const int totalWidth = priceWidth + kPriceCurrencyGapPx + currencyWidth;
+    const int startX = kScreenCenterX - (totalWidth / 2);
+    const int priceY = kPriceCenterY - (priceHeight / 2);
+    const int currencyY = priceY + (priceHeight - currencyHeight);
+
+    tft.setTextFont(4);
+    tft.setTextSize(3);
+    tft.drawString(priceText, startX, priceY);
+
+    tft.setTextFont(2);
+    tft.setTextSize(2);
+    tft.drawString(currencyText, startX + priceWidth + kPriceCurrencyGapPx, currencyY);
+
     tft.setTextSize(1);
+    tft.setTextDatum(TL_DATUM);
   }
 
   struct ChartRange
@@ -298,11 +354,23 @@ namespace
     tft.drawString(errorText, kScreenCenterX, 96);
   }
 
-  void drawSourceLabel(const String &source)
+  void drawClockLabel()
   {
-    const String text = source.isEmpty() ? "UNKNOWN" : source;
+    String text = "--:--";
+    const time_t now = time(nullptr);
+    if (now > 1700000000)
+    {
+      struct tm tmNow;
+      if (localtime_r(&now, &tmNow))
+      {
+        char buf[8];
+        strftime(buf, sizeof(buf), "%H:%M", &tmNow);
+        text = String(buf);
+      }
+    }
+
     tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
-    tft.setTextFont(2);
+    tft.setTextFont(4);
     tft.setTextDatum(TR_DATUM);
     tft.drawString(text, kSourceLabelX, kSourceLabelY);
     tft.setTextDatum(TL_DATUM);
@@ -468,7 +536,7 @@ void displayDrawPrices(const PriceState &state)
   tft.fillScreen(TFT_BLACK);
   tft.setTextWrap(false);
   tft.setTextSize(1);
-  drawSourceLabel(state.source);
+  drawClockLabel();
 
   if (!state.ok)
   {
@@ -478,7 +546,7 @@ void displayDrawPrices(const PriceState &state)
 
   if (state.count == 0)
   {
-    drawPriceText(formatPrice(state.currentPrice), levelColor(state.currentLevel));
+    drawPriceText(state.currentPrice, state.currency, levelColor(state.currentLevel));
     tft.setTextDatum(TL_DATUM);
     return;
   }
@@ -494,7 +562,7 @@ void displayDrawPrices(const PriceState &state)
   {
     currentPriceColor = barGradientColor(state.points[state.currentIndex], bands, range);
   }
-  drawPriceText(formatPrice(state.currentPrice), currentPriceColor);
+  drawPriceText(state.currentPrice, state.currency, currentPriceColor);
   tft.setTextDatum(TL_DATUM);
 
   tft.drawRect(kChartX - 1, kChartY - 1, kChartW + 2, kChartH + 2, TFT_DARKGREY);

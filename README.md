@@ -3,7 +3,7 @@
 ESP32 + 2.4" TFT electricity price display for Nord Pool.
 
 This project runs on a FireBeetle ESP32 and shows:
-- Current price as large text (`#.## kr`) with color based on price level.
+- Current price as large text (`#.## SEK/NOK/EUR/...`) with color based on price level.
 - Price bars for today + tomorrow at 15/30/60-minute resolution.
 - Current interval with a white downward arrow marker.
 
